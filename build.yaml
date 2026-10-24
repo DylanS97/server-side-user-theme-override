@@ -1,0 +1,18 @@
+---
+name: "User Themes"
+guid: "f1d7a83d-9ed7-4699-ae47-64c74b632f8b"
+version: "1.0.0.0"
+targetAbi: "12.0.0.0"
+framework: "net10.0"
+overview: "Saved custom CSS themes, switchable globally or set per user"
+description: >
+  Keep a library of custom CSS themes and switch the server-wide Branding custom CSS between them
+  in one click. Any user can also be given their own theme, which replaces the global custom CSS
+  for that user only. Admins can preview a theme on their own account before using it.
+category: "General"
+owner: "DylanS97"
+artifacts:
+- "Jellyfin.Plugin.UserThemes.dll"
+changelog: >
+  - First release: theme library, one-click global theme switching, import of the current Branding CSS,
+  per-user themes and preview on your own account.

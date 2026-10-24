@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>User Themes</title>
+</head>
+<body>
+    <div id="UserThemesConfigPage"
+         data-role="page"
+         class="page type-interior pluginConfigurationPage"
+         data-require="emby-input,emby-button,emby-select,emby-textarea">
+        <style>
+            #UserThemesConfigPage .ut-card { padding: 1em; margin-bottom: 1em; border-radius: 0.3em; background: rgba(128, 128, 128, 0.12); }
+            #UserThemesConfigPage .ut-card-header { display: flex; align-items: center; gap: 0.75em; flex-wrap: wrap; }
+            #UserThemesConfigPage .ut-card-name { font-size: 1.2em; font-weight: bold; flex: 1; }
+            #UserThemesConfigPage .ut-card-detail { margin: 0.3em 0; opacity: 0.85; }
+            #UserThemesConfigPage .ut-status { padding: 0.15em 0.6em; border-radius: 1em; font-size: 0.85em; }
+            #UserThemesConfigPage .ut-status-active { background: #2e7d32; color: #fff; }
+            #UserThemesConfigPage .ut-status-preview { background: #b87800; color: #fff; }
+            #UserThemesConfigPage .ut-buttons { display: flex; gap: 0.5em; flex-wrap: wrap; margin-top: 0.5em; }
+            #UserThemesConfigPage .ut-buttons .emby-button { margin: 0; }
+            #UserThemesConfigPage .ut-css { font-family: monospace; min-height: 24em; white-space: pre; }
+            #UserThemesConfigPage .ut-user-row { display: flex; align-items: center; gap: 1em; flex-wrap: wrap; margin-bottom: 0.5em; }
+            #UserThemesConfigPage .ut-user-row .ut-user-name { flex: 1; min-width: 8em; }
+            #UserThemesConfigPage .ut-user-row .selectContainer { flex: 2; min-width: 12em; margin-bottom: 0; }
+        </style>
+
+        <div data-role="content">
+            <div class="content-primary">
+
+                <div id="utListView">
+                    <div class="sectionTitleContainer flex align-items-center">
+                        <h2 class="sectionTitle">Global custom CSS</h2>
+                    </div>
+                    <p class="fieldDescription">
+                        The CSS in Dashboard &gt; Branding &gt; Custom CSS, used by every user without a theme of their own.
+                        Activating a theme below copies its CSS there.
+                    </p>
+                    <div class="ut-card">
+                        <div class="ut-card-detail" id="utGlobalStatus"></div>
+                        <div class="ut-buttons">
+                            <button is="emby-button" type="button" id="utImport" class="raised emby-button">
+                                <span>Save current Branding CSS as theme</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="sectionTitleContainer flex align-items-center">
+                        <h2 class="sectionTitle">Themes</h2>
+                    </div>
+                    <p class="fieldDescription">
+                        Previews and user themes show on the normal Jellyfin pages (not the dashboard) after a reload, or within about a minute.
+                    </p>
+                    <div id="utThemeList"></div>
+                    <button is="emby-button" type="button" id="utAdd" class="raised button-submit emby-button">
+                        <span>Add theme</span>
+                    </button>
+
+                    <div class="sectionTitleContainer flex align-items-center">
+                        <h2 class="sectionTitle">Users</h2>
+                    </div>
+                    <p class="fieldDescription">
+                        A user's theme replaces the global custom CSS for that user only. Changes are saved straight away.
+                    </p>
+                    <div id="utUsers"></div>
+                </div>
+
+                <form id="utEditForm" class="hide">
+                    <div class="sectionTitleContainer flex align-items-center">
+                        <h2 class="sectionTitle" id="utEditTitle">Theme</h2>
+                    </div>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="utName">Name</label>
+                        <input id="utName" type="text" is="emby-input" required maxlength="100" />
+                    </div>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="utCss">CSS</label>
+                        <textarea id="utCss" is="emby-textarea" class="ut-css" spellcheck="false"></textarea>
+                        <div class="fieldDescription" id="utCssDescription">Leave empty for a theme with no custom CSS.</div>
+                    </div>
+
+                    <div class="ut-buttons">
+                        <button is="emby-button" type="submit" class="raised button-submit emby-button"><span>Save</span></button>
+                        <button is="emby-button" type="button" id="utCancel" class="raised button-cancel emby-button"><span>Cancel</span></button>
+                    </div>
+                </form>
+
+            </div>
+        </div>
+
+        <script type="text/javascript">
+            (function () {
+                'use strict';
+
+                var pluginId = 'f1d7a83d-9ed7-4699-ae47-64c74b632f8b';
+
+                var page = document.getElementById('UserThemesConfigPage');
+                var config = null;
+                var branding = null;
+                var users = [];
+                var currentUserId = null;
+                var editing = null;
+
+                function $(id) {
+                    return page.querySelector('#' + id);
+                }
+
+                function normalizeId(id) {
+                    return (id || '').replace(/-/g, '').toLowerCase();
+                }
+
+                function normalizeCss(css) {
+                    return (css || '').replace(/\r\n/g, '\n');
+                }
+
+                function newGuid() {
+                    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+                        var r = Math.random() * 16 | 0;
+                        return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+                    });
+                }
+
+                function el(tag, className, text) {
+                    var node = document.createElement(tag);
+                    if (className) {
+                        node.className = className;
+                    }
+
+                    if (text !== undefined) {
+                        node.textContent = text;
+                    }
+
+                    return node;
+                }
+
+                function button(text, onClick) {
+                    var node = el('button', 'raised emby-button');
+                    node.type = 'button';
+                    node.setAttribute('is', 'emby-button');
+                    node.appendChild(el('span', null, text));
+                    node.addEventListener('click', onClick);
+                    return node;
+                }
+
+                function findTheme(themeId) {
+                    return config.Themes.find(function (t) { return normalizeId(t.Id) === normalizeId(themeId); });
+                }
+
+                function findAssignment(list, userId) {
+                    return list.find(function (a) { return normalizeId(a.UserId) === normalizeId(userId); });
+                }
+
+                function isActive(theme) {
+                    return normalizeCss(theme.Css) === normalizeCss(branding.CustomCss);
+                }
+
+                function isPreviewing(theme) {
+                    var preview = findAssignment(config.PreviewThemes, currentUserId);
+                    return !!preview && normalizeId(preview.ThemeId) === normalizeId(theme.Id);
+                }
+
+                function usersOf(theme) {
+                    return config.UserThemes
+                        .filter(function (a) { return normalizeId(a.ThemeId) === normalizeId(theme.Id); })
+                        .map(function (a) {
+                            var user = users.find(function (u) { return normalizeId(u.Id) === normalizeId(a.UserId); });
+                            return user ? user.Name : 'Unknown user';
+                        });
+                }
+
+                function loadBranding() {
+                    // Read the stored branding, not /Branding/Configuration, which this plugin rewrites for the current user.
+                    return ApiClient.getNamedConfiguration('branding').then(function (result) {
+                        branding = result;
+                    });
+                }
+
+                function loadAll() {
+                    Dashboard.showLoadingMsg();
+                    currentUserId = ApiClient.getCurrentUserId();
+                    return Promise.all([
+                        ApiClient.getPluginConfiguration(pluginId),
+                        ApiClient.getUsers(),
+                        loadBranding()
+                    ]).then(function (results) {
+                        config = results[0];
+                        config.Themes = config.Themes || [];
+                        config.UserThemes = config.UserThemes || [];
+                        config.PreviewThemes = config.PreviewThemes || [];
+                        users = results[1];
+                        render();
+                        Dashboard.hideLoadingMsg();
+                    }).catch(function () {
+                        Dashboard.hideLoadingMsg();
+                        Dashboard.alert('Failed to load User Themes settings.');
+                    });
+                }
+
+                function render() {
+                    renderGlobal();
+                    renderThemes();
+                    renderUsers();
+                }
+
+                function renderGlobal() {
+                    var active = config.Themes.find(isActive);
+                    var text;
+                    if (active) {
+                        text = 'Active theme: ' + active.Name;
+                    } else if (normalizeCss(branding.CustomCss)) {
+                        text = 'Custom (not a saved theme)';
+                    } else {
+                        text = 'None — no global custom CSS';
+                    }
+
+                    $('utGlobalStatus').textContent = text;
+                    $('utImport').disabled = !!active || !normalizeCss(branding.CustomCss);
+                }
+
+                function renderThemes() {
+                    var list = $('utThemeList');
+                    list.innerHTML = '';
+
+                    if (config.Themes.length === 0) {
+                        list.appendChild(el('p', null, 'No themes yet.'));
+                        return;
+                    }
+
+                    config.Themes.forEach(function (theme) {
+                        var card = el('div', 'ut-card');
+                        var header = el('div', 'ut-card-header');
+                        header.appendChild(el('div', 'ut-card-name', theme.Name));
+
+                        var active = isActive(theme);
+                        var previewing = isPreviewing(theme);
+                        if (active) {
+                            header.appendChild(el('span', 'ut-status ut-status-active', 'Active globally'));
+                        }
+
+                        if (previewing) {
+                            header.appendChild(el('span', 'ut-status ut-status-preview', 'Previewing'));
+                        }
+
+                        card.appendChild(header);
+
+                        var assigned = usersOf(theme);
+                        card.appendChild(el('div', 'ut-card-detail', 'Users: ' + (assigned.join(', ') || 'none')));
+
+                        var buttons = el('div', 'ut-buttons');
+                        buttons.appendChild(button('Edit', function () { openEditor(theme); }));
+                        if (!active) {
+                            buttons.appendChild(button('Activate globally', function () { activate(theme); }));
+                        }
+
+                        buttons.appendChild(previewing
+                            ? button('Stop preview', stopPreview)
+                            : button('Preview as me', function () { startPreview(theme); }));
+                        buttons.appendChild(button('Delete', function () { deleteTheme(theme); }));
+                        card.appendChild(buttons);
+
+                        list.appendChild(card);
+                    });
+                }
+
+                function renderUsers() {
+                    var container = $('utUsers');
+                    container.innerHTML = '';
+
+                    users.forEach(function (user) {
+                        var row = el('div', 'ut-user-row');
+                        row.appendChild(el('div', 'ut-user-name', user.Name));
+
+                        var selectContainer = el('div', 'selectContainer');
+                        var select = document.createElement('select');
+                        select.setAttribute('is', 'emby-select');
+                        select.setAttribute('aria-label', 'Theme for ' + user.Name);
+
+                        var global = el('option', null, 'Use global custom CSS');
+                        global.value = '';
+                        select.appendChild(global);
+                        config.Themes.forEach(function (theme) {
+                            var option = el('option', null, theme.Name);
+                            option.value = theme.Id;
+                            select.appendChild(option);
+                        });
+
+                        var assignment = findAssignment(config.UserThemes, user.Id);
+                        var assignedTheme = assignment ? findTheme(assignment.ThemeId) : null;
+                        select.value = assignedTheme ? assignedTheme.Id : '';
+                        select.addEventListener('change', function () { assignTheme(user, select.value); });
+
+                        selectContainer.appendChild(select);
+                        row.appendChild(selectContainer);
+                        container.appendChild(row);
+                    });
+                }
+
+                function saveConfig(changes) {
+                    Dashboard.showLoadingMsg();
+                    return ApiClient.getPluginConfiguration(pluginId).then(function (latest) {
+                        Object.keys(changes).forEach(function (key) {
+                            latest[key] = changes[key];
+                        });
+
+                        return ApiClient.updatePluginConfiguration(pluginId, latest).then(function (result) {
+                            config = latest;
+                            Dashboard.processPluginConfigurationUpdateResult(result);
+                            render();
+                            return true;
+                        });
+                    }).catch(function () {
+                        Dashboard.hideLoadingMsg();
+                        Dashboard.alert('Failed to save User Themes settings.');
+                        render();
+                        return false;
+                    });
+                }
+
+                function saveBrandingCss(css) {
+                    // Write the full stored branding back so the other branding settings are kept.
+                    Dashboard.showLoadingMsg();
+                    return ApiClient.getNamedConfiguration('branding').then(function (latest) {
+                        latest.CustomCss = css;
+                        return ApiClient.updateNamedConfiguration('branding', latest).then(function () {
+                            branding = latest;
+                            Dashboard.hideLoadingMsg();
+                            render();
+                            return true;
+                        });
+                    }).catch(function () {
+                        Dashboard.hideLoadingMsg();
+                        Dashboard.alert('Failed to update the Branding custom CSS.');
+                        return false;
+                    });
+                }
+
+                function activate(theme) {
+                    if (!window.confirm('Replace Dashboard > Branding > Custom CSS with the "' + theme.Name + '" theme for everyone without their own theme?')) {
+                        return;
+                    }
+
+                    var current = normalizeCss(branding.CustomCss);
+                    if (current && !config.Themes.some(isActive)
+                        && !window.confirm('The current Branding CSS isn\'t saved as a theme and will be lost. Continue anyway?')) {
+                        return;
+                    }
+
+                    saveBrandingCss(theme.Css || '');
+                }
+
+                function startPreview(theme) {
+                    var previews = config.PreviewThemes.filter(function (a) { return normalizeId(a.UserId) !== normalizeId(currentUserId); });
+                    previews.push({ UserId: currentUserId, ThemeId: theme.Id });
+                    saveConfig({ PreviewThemes: previews }).then(function (saved) {
+                        if (saved) {
+                            Dashboard.alert('Previewing "' + theme.Name + '" on your account. Go to the home screen and reload to see it.');
+                        }
+                    });
+                }
+
+                function stopPreview() {
+                    saveConfig({
+                        PreviewThemes: config.PreviewThemes.filter(function (a) { return normalizeId(a.UserId) !== normalizeId(currentUserId); })
+                    });
+                }
+
+                function assignTheme(user, themeId) {
+                    var assignments = config.UserThemes.filter(function (a) { return normalizeId(a.UserId) !== normalizeId(user.Id); });
+                    if (themeId) {
+                        assignments.push({ UserId: user.Id, ThemeId: themeId });
+                    }
+
+                    saveConfig({ UserThemes: assignments });
+                }
+
+                function importBranding() {
+                    var name = window.prompt('Name for the new theme:', '');
+                    if (name === null) {
+                        return;
+                    }
+
+                    var theme = { Id: newGuid(), Name: name.trim(), Css: branding.CustomCss || '' };
+                    var error = validate(theme);
+                    if (error) {
+                        Dashboard.alert(error);
+                        return;
+                    }
+
+                    saveConfig({ Themes: config.Themes.concat([theme]) });
+                }
+
+                function deleteTheme(theme) {
+                    var assigned = usersOf(theme);
+                    var message = 'Delete the theme "' + theme.Name + '"?';
+                    if (assigned.length > 0) {
+                        message += ' These users go back to the global custom CSS: ' + assigned.join(', ') + '.';
+                    }
+
+                    if (isActive(theme)) {
+                        message += ' The Branding custom CSS is not changed.';
+                    }
+
+                    if (!window.confirm(message)) {
+                        return;
+                    }
+
+                    function keep(a) {
+                        return normalizeId(a.ThemeId) !== normalizeId(theme.Id);
+                    }
+
+                    saveConfig({
+                        Themes: config.Themes.filter(function (t) { return normalizeId(t.Id) !== normalizeId(theme.Id); }),
+                        UserThemes: config.UserThemes.filter(keep),
+                        PreviewThemes: config.PreviewThemes.filter(keep)
+                    });
+                }
+
+                function validate(theme) {
+                    if (!theme.Name) {
+                        return 'Enter a name.';
+                    }
+
+                    var lower = theme.Name.toLowerCase();
+                    var duplicate = config.Themes.some(function (t) {
+                        return normalizeId(t.Id) !== normalizeId(theme.Id) && (t.Name || '').toLowerCase() === lower;
+                    });
+                    if (duplicate) {
+                        return 'Another theme is already called "' + theme.Name + '".';
+                    }
+
+                    return null;
+                }
+
+                function openEditor(theme) {
+                    editing = theme
+                        ? JSON.parse(JSON.stringify(theme))
+                        : { Id: newGuid(), Name: '', Css: '' };
+
+                    $('utEditTitle').textContent = theme ? 'Edit ' + theme.Name : 'New theme';
+                    $('utName').value = editing.Name;
+                    $('utCss').value = editing.Css || '';
+                    $('utCssDescription').textContent = theme && isActive(theme)
+                        ? 'This theme is active globally, so saving also updates Dashboard > Branding > Custom CSS.'
+                        : 'Leave empty for a theme with no custom CSS.';
+
+                    $('utListView').classList.add('hide');
+                    $('utEditForm').classList.remove('hide');
+                    window.scrollTo(0, 0);
+                }
+
+                function closeEditor() {
+                    editing = null;
+                    $('utEditForm').classList.add('hide');
+                    $('utListView').classList.remove('hide');
+                }
+
+                function onSubmit(e) {
+                    e.preventDefault();
+
+                    var theme = {
+                        Id: editing.Id,
+                        Name: $('utName').value.trim(),
+                        Css: normalizeCss($('utCss').value)
+                    };
+
+                    var error = validate(theme);
+                    if (error) {
+                        Dashboard.alert(error);
+                        return;
+                    }
+
+                    var existing = findTheme(theme.Id);
+                    var wasActive = !!existing && isActive(existing);
+
+                    var themes = config.Themes.filter(function (t) { return normalizeId(t.Id) !== normalizeId(theme.Id); });
+                    var index = config.Themes.findIndex(function (t) { return normalizeId(t.Id) === normalizeId(theme.Id); });
+                    themes.splice(index === -1 ? themes.length : index, 0, theme);
+
+                    saveConfig({ Themes: themes }).then(function (saved) {
+                        if (!saved) {
+                            return;
+                        }
+
+                        closeEditor();
+                        if (wasActive && normalizeCss(existing.Css) !== theme.Css) {
+                            saveBrandingCss(theme.Css);
+                        }
+                    });
+                }
+
+                $('utAdd').addEventListener('click', function () { openEditor(null); });
+                $('utImport').addEventListener('click', importBranding);
+                $('utCancel').addEventListener('click', closeEditor);
+                $('utEditForm').addEventListener('submit', onSubmit);
+
+                loadAll();
+            }());
+        </script>
+    </div>
+</body>
+</html>
