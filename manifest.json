@@ -6,6 +6,15 @@
         "overview": "Saved custom CSS themes, switchable globally or set per user",
         "owner": "DylanS97",
         "category": "General",
-        "versions": []
+        "versions": [
+            {
+                "version": "1.0.0.0",
+                "changelog": "",
+                "targetAbi": "12.0.0.0",
+                "sourceUrl": "https://github.com/DylanS97/server-side-user-theme-override/releases/download/v1.0.0.0/user-themes_1.0.0.0.zip",
+                "checksum": "baf00d4ab4798d21a64688b00ef212a3",
+                "timestamp": "2026-10-24T02:10:51Z"
+            }
+        ]
     }
 ]
